@@ -89,6 +89,9 @@
   .searchbar{display:flex;gap:10px;padding:14px;margin-bottom:22px;position:relative;}
   .searchwrap{flex:1;position:relative;}
   .searchwrap input{width:100%;}
+  input[type=date]{padding:12px 13px;font-size:14px;color:var(--text);font-family:'Inter';
+    background:var(--card-2);border:1px solid var(--border);border-radius:11px;outline:none;cursor:pointer;}
+  input[type=date]:focus{border-color:var(--border-hover);box-shadow:0 0 0 3px var(--glow);}
   #suggest{position:absolute;top:calc(100% + 6px);left:0;right:0;z-index:20;
     background:#fff;border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);
     max-height:320px;overflow:auto;display:none;}
@@ -182,9 +185,10 @@
       <input id="q" type="text" placeholder="Search a person (partner/director) or organisation name…" autocomplete="off">
       <div id="suggest"></div>
     </div>
+    <input id="fromDate" type="date" title="Show only projects with completion date from this date up to today" onchange="search()">
     <button id="searchBtn">Search</button>
   </div>
-  <div class="hint" style="margin:-12px 2px 22px;">Type at least 2 letters of a person's or organisation's name, then press Enter.</div>
+  <div class="hint" style="margin:-12px 2px 22px;">Type at least 2 letters of a name · Pick a start date to show only projects with completion date between it and today (leave empty for all).</div>
 
   <div class="grid">
     <div id="results"></div>
@@ -330,27 +334,54 @@ function search(){
   setActive(out[0].id);
 }
 
+function parseDMY(s){
+  const m=/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec((s||'').trim());
+  return m?new Date(+m[3],+m[2]-1,+m[1]):null;
+}
+function isNAProj(o){
+  const na=v=>!v||String(v).trim().toUpperCase()==='NA';
+  return na(o.rera)||na(o.name)||na(o.completion);
+}
+function dateRange(){
+  const v=$('#fromDate').value;
+  if(!v) return null;
+  const from=new Date(v+'T00:00:00');
+  const to=new Date(); to.setHours(23,59,59,999);
+  return {from,to};
+}
 function cardOf(p){
-  const rows=p.orgs.map((o,i)=>`
-    <tr data-i="${i}" class="on">
-      <td class="chk"><input type="checkbox" checked onchange="onChange(${p.id})"></td>
-      <td>${i+1}</td>
+  const rng=dateRange();
+  const visible=p.orgs.map((o,i)=>({o,i})).filter(({o})=>{
+    if(!rng) return true;
+    const d=parseDMY(o.completion);
+    return d && d>=rng.from && d<=rng.to;
+  });
+  const rows=visible.map(({o,i},n)=>{
+    const off=isNAProj(o);
+    return `
+    <tr data-i="${i}" class="${off?'off':'on'}">
+      <td class="chk"><input type="checkbox" ${off?'':'checked'} onchange="onChange(${p.id})"></td>
+      <td>${n+1}</td>
       <td>${esc(o.name)}</td>
       <td class="addr">${esc(o.address)}</td>
       <td>${esc(o.rera)}</td>
       <td>${esc(o.completion)}</td>
-    </tr>`).join('');
+    </tr>`;}).join('');
+  const hidden=p.orgs.length-visible.length;
   return `
   <div class="glass person" data-pid="${p.id}" onclick="setActive(${p.id})">
     <h3>${esc(p.name)}</h3>
-    ${p.type==='person'?`<div class="hint" style="margin:-8px 0 12px;">${p.role?esc(p.role)+' · ':''}${p.orgs.length} project(s)</div>`:''}
+    ${p.type==='person'?`<div class="hint" style="margin:-8px 0 12px;">${p.role?esc(p.role)+' · ':''}${p.orgs.length} project(s)${hidden>0?` · ${hidden} outside date range`:''}</div>`:''}
     <div class="field">
       <label for="din-${p.id}">DIN/DPIN (If applicable)</label>
       <input id="din-${p.id}" type="text" value="${esc(p.din)}" placeholder="Enter DIN/DPIN"
              oninput="onChange(${p.id})">
     </div>
     <table>
-      <thead><tr><th class="chk"></th><th>S.No</th><th>Organization</th><th>Address</th><th>RERA No.</th><th>Completion</th></tr></thead>
+      <thead><tr>
+        <th class="chk"><input type="checkbox" checked title="Select all / remove all" onchange="toggleAll(${p.id},this.checked)"></th>
+        <th>S.No</th><th>Organization</th><th>Address</th><th>RERA No.</th><th>Completion</th>
+      </tr></thead>
       <tbody>${rows||'<tr><td class="chk"></td><td>NA</td><td>NA</td><td>NA</td><td>NA</td><td>NA</td></tr>'}</tbody>
     </table>
     <div class="actions">
@@ -372,6 +403,11 @@ function setActive(pid){
   activePid=pid;
   document.querySelectorAll('.person').forEach(c=>c.classList.toggle('active',+c.dataset.pid===pid));
   renderPreview(pid);
+}
+function toggleAll(pid,checked){
+  const card=personCardEl(pid); if(!card) return;
+  card.querySelectorAll('tbody tr[data-i] input[type=checkbox]').forEach(cb=>{cb.checked=checked;});
+  onChange(pid);
 }
 function onChange(pid){
   const card=personCardEl(pid);
