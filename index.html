@@ -185,10 +185,10 @@
       <input id="q" type="text" placeholder="Search a person (partner/director) or organisation name…" autocomplete="off">
       <div id="suggest"></div>
     </div>
-    <input id="fromDate" type="date" title="Show only projects with completion date from this date up to today" onchange="search()">
+    <input id="fromDate" type="date" title="Show only projects with completion date on or after this date" onchange="search()">
     <button id="searchBtn">Search</button>
   </div>
-  <div class="hint" style="margin:-12px 2px 22px;">Type at least 2 letters of a name · Pick a start date to show only projects with completion date between it and today (leave empty for all).</div>
+  <div class="hint" style="margin:-12px 2px 22px;">Type at least 2 letters of a name · Pick a start date to show only projects with completion date on or after it (leave empty for all).</div>
 
   <div class="grid">
     <div id="results"></div>
@@ -345,16 +345,15 @@ function isNAProj(o){
 function dateRange(){
   const v=$('#fromDate').value;
   if(!v) return null;
-  const from=new Date(v+'T00:00:00');
-  const to=new Date(); to.setHours(23,59,59,999);
-  return {from,to};
+  // From the selected date onwards — no upper limit.
+  return {from:new Date(v+'T00:00:00')};
 }
 function cardOf(p){
   const rng=dateRange();
   const visible=p.orgs.map((o,i)=>({o,i})).filter(({o})=>{
     if(!rng) return true;
     const d=parseDMY(o.completion);
-    return d && d>=rng.from && d<=rng.to;
+    return d && d>=rng.from;
   });
   const rows=visible.map(({o,i},n)=>{
     const off=isNAProj(o);
