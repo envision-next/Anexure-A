@@ -86,7 +86,19 @@
   .source.sample{background:rgba(224,139,255,.14);color:#9333ea;}
   .source.sample .dot{background:var(--accent-3);}
 
-  .searchbar{display:flex;gap:10px;padding:14px;margin-bottom:22px;}
+  .searchbar{display:flex;gap:10px;padding:14px;margin-bottom:22px;position:relative;}
+  .searchwrap{flex:1;position:relative;}
+  .searchwrap input{width:100%;}
+  #suggest{position:absolute;top:calc(100% + 6px);left:0;right:0;z-index:20;
+    background:#fff;border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);
+    max-height:320px;overflow:auto;display:none;}
+  #suggest.open{display:block;}
+  .sug{padding:10px 14px;font-size:14px;cursor:pointer;display:flex;justify-content:space-between;
+    gap:10px;align-items:center;border-bottom:1px solid var(--line-soft,#eef1f7);}
+  .sug:last-child{border-bottom:none;}
+  .sug:hover,.sug.sel{background:var(--card-2);}
+  .sug .tag{font-size:11px;color:var(--muted);white-space:nowrap;}
+  .sug b{font-weight:600;}
   input[type=text]{flex:1;padding:13px 15px;font-size:15px;color:var(--text);
     background:var(--card-2);border:1px solid var(--border);border-radius:11px;outline:none;
     transition:border .15s,box-shadow .15s,background .15s;}
@@ -166,7 +178,10 @@
   <div id="source" class="source sample"><span class="dot"></span> Loading data…</div>
 
   <div class="glass searchbar">
-    <input id="q" type="text" placeholder="Search a person (partner/director) or organisation name…" autocomplete="off">
+    <div class="searchwrap">
+      <input id="q" type="text" placeholder="Search a person (partner/director) or organisation name…" autocomplete="off">
+      <div id="suggest"></div>
+    </div>
     <button id="searchBtn">Search</button>
   </div>
   <div class="hint" style="margin:-12px 2px 22px;">Type at least 2 letters of a person's or organisation's name, then press Enter.</div>
@@ -453,8 +468,47 @@ function generate(pid,btn){
   }).finally(()=>{btn.disabled=false;btn.textContent=old;});
 }
 
-$('#searchBtn').onclick=search;
-$('#q').addEventListener('keydown',e=>{if(e.key==='Enter')search();});
+/* ---------- Autocomplete dropdown ---------- */
+let sugItems=[], sugSel=-1, sugTimer=null;
+function hideSuggest(){$('#suggest').classList.remove('open');sugItems=[];sugSel=-1;}
+function pickSuggest(name){$('#q').value=name;hideSuggest();search();}
+function renderSuggest(){
+  const box=$('#suggest');
+  if(!sugItems.length){hideSuggest();return;}
+  box.innerHTML=sugItems.map((e,i)=>`
+    <div class="sug${i===sugSel?' sel':''}" onmousedown="event.preventDefault();pickSuggest(${JSON.stringify(e.name).replace(/"/g,'&quot;')})">
+      <b>${esc(e.name)}</b>
+      <span class="tag">${e.type==='person'?esc(e.role||'Person'):'Organisation'} · ${e.orgs.length} project(s)</span>
+    </div>`).join('');
+  box.classList.add('open');
+}
+function updateSuggest(){
+  const q=$('#q').value.trim().toLowerCase();
+  if(q.length<2||!ENTITIES.length){hideSuggest();return;}
+  const starts=[],contains=[];
+  for(const e of ENTITIES){
+    const n=e.name.toLowerCase();
+    if(n.startsWith(q)) starts.push(e);
+    else if(n.includes(q)) contains.push(e);
+    if(starts.length>=8) break;
+  }
+  sugItems=[...starts,...contains].slice(0,8);
+  sugSel=-1;
+  renderSuggest();
+}
+$('#q').addEventListener('input',()=>{clearTimeout(sugTimer);sugTimer=setTimeout(updateSuggest,120);});
+$('#q').addEventListener('blur',()=>setTimeout(hideSuggest,150));
+$('#q').addEventListener('keydown',e=>{
+  const open=$('#suggest').classList.contains('open');
+  if(e.key==='ArrowDown'&&open){e.preventDefault();sugSel=Math.min(sugSel+1,sugItems.length-1);renderSuggest();}
+  else if(e.key==='ArrowUp'&&open){e.preventDefault();sugSel=Math.max(sugSel-1,0);renderSuggest();}
+  else if(e.key==='Escape'){hideSuggest();}
+  else if(e.key==='Enter'){
+    if(open&&sugSel>=0){pickSuggest(sugItems[sugSel].name);}
+    else{hideSuggest();search();}
+  }
+});
+$('#searchBtn').onclick=()=>{hideSuggest();search();};
 loadExcel();
 </script>
 </body>
