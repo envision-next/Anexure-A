@@ -203,7 +203,7 @@ function cellStr(v){
 async function loadExcel(){
   const st=$('#introStatus');
   try{
-    st.textContent='Downloading registry (9 MB)…';
+    st.textContent='Downloading registry (12 MB)…';
     const res=await fetch('Anexure%20A.xlsx');
     if(!res.ok) throw new Error('HTTP '+res.status);
     const buf=await res.arrayBuffer();
