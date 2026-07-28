@@ -220,13 +220,15 @@ async function loadExcel(){
     const iComp=col('completion');
     const iCmpl=col('complaint');
     const iPart=col('partner');
+    const iProj=col('project','name');
     const orgMap=new Map();     // organisation name -> entity
     const personMap=new Map();  // person name (lowercase) -> entity
     for(let r=1;r<rows.length;r++){
       const row=rows[r]; if(!row) continue;
-      const org=cellStr(row[iOrg]); if(!org) continue;
+      const org=cellStr(row[iOrg]) || cellStr(row[iProj]);  // fall back to project name
+      if(!org && !cellStr(row[iRera])) continue;            // truly empty row
       const proj={
-        name:org,
+        name:org||'NA',
         address:cellStr(row[iAddr]),
         rera:cellStr(row[iRera]),
         completion:cellStr(row[iComp]),
@@ -234,9 +236,11 @@ async function loadExcel(){
         warrants:'No',
         revoked:'No',
       };
-      let e=orgMap.get(org);
-      if(!e){e={name:org,din:'',type:'org',role:'',orgs:[]};orgMap.set(org,e);}
-      e.orgs.push(proj);
+      if(org){
+        let e=orgMap.get(org);
+        if(!e){e={name:org,din:'',type:'org',role:'',orgs:[]};orgMap.set(org,e);}
+        e.orgs.push(proj);
+      }
       // Parse "Partner Details" -> "Designation: [Name1, Name2], Designation2: [Name3]"
       if(iPart>=0){
         const pd=cellStr(row[iPart]);
@@ -296,7 +300,15 @@ function search(){
   }
   PEOPLE=out;
   $('#countPill').textContent=`${total} ${total===1?'match':'matches'}`;
-  if(!out.length){box.innerHTML='<div class="glass empty" style="padding:18px;">No matching organisation found.</div>';renderPreview(null);return;}
+  if(!out.length){
+    // Not in the registry -> still allow an Annexure, stating "No" with NA tables.
+    const nice=$('#q').value.trim().replace(/\S+/g,w=>w[0].toUpperCase()+w.slice(1).toLowerCase());
+    const ghost={id:99999999,name:nice,din:'',type:'person',role:'Not found in registry',orgs:[]};
+    PEOPLE=[ghost];
+    box.innerHTML=`<div class="hint" style="margin:0 2px 12px;">No registered projects found for “${esc(nice)}” — the Annexure will state “No”.</div>`+cardOf(ghost);
+    setActive(ghost.id);
+    return;
+  }
   let banner='';
   if(total>out.length){banner=`<div class="hint" style="margin:0 2px 12px;">Showing first ${out.length} of ${total} matches — refine your search to narrow it down.</div>`;}
   box.innerHTML=banner+out.map(cardOf).join('');
@@ -372,7 +384,7 @@ function renderPreview(pid){
     <div class="center">Disclosure of Interest in Other Real Estate Organizations</div>
     <div class="row"><b>Name:</b> ${esc(p.name)}</div>
     <div class="row"><b>DIN/DPIN (If applicable):</b> ${esc(din)||'—'}</div>
-    <div class="row">Are you a Director/ Designated Partner/ Partner/ Proprietor of any organization whose real estate project is registered with any RERA across the country? – <b>Yes</b></div>
+    <div class="row">Are you a Director/ Designated Partner/ Partner/ Proprietor of any organization whose real estate project is registered with any RERA across the country? – <b>${chosen.length?'Yes':'No'}</b></div>
     <div class="row">If yes, please provide the following information:</div>
     <table><thead><tr><th>S.No</th><th>Name of the organization</th><th>Address</th><th>RERA Registration Number</th></tr></thead><tbody>${orgRows}</tbody></table>
     <div class="row">Status of the Real Estate Projects mentioned above:</div>
