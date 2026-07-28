@@ -166,10 +166,10 @@
   <div id="source" class="source sample"><span class="dot"></span> Loading data…</div>
 
   <div class="glass searchbar">
-    <input id="q" type="text" placeholder="Search organisation / promoter name (e.g. Mayfair)…" autocomplete="off">
+    <input id="q" type="text" placeholder="Search a person (partner/director) or organisation name…" autocomplete="off">
     <button id="searchBtn">Search</button>
   </div>
-  <div class="hint" style="margin:-12px 2px 22px;">Type at least 2 letters of the organisation name, then press Enter.</div>
+  <div class="hint" style="margin:-12px 2px 22px;">Type at least 2 letters of a person's or organisation's name, then press Enter.</div>
 
   <div class="grid">
     <div id="results"></div>
@@ -203,7 +203,7 @@ function cellStr(v){
 async function loadExcel(){
   const st=$('#introStatus');
   try{
-    st.textContent='Downloading registry (7.6 MB)…';
+    st.textContent='Downloading registry (9 MB)…';
     const res=await fetch('Anexure%20A.xlsx');
     if(!res.ok) throw new Error('HTTP '+res.status);
     const buf=await res.arrayBuffer();
@@ -219,13 +219,13 @@ async function loadExcel(){
     const iAddr=col('address');
     const iComp=col('completion');
     const iCmpl=col('complaint');
-    const map=new Map();
+    const iPart=col('partner');
+    const orgMap=new Map();     // organisation name -> entity
+    const personMap=new Map();  // person name (lowercase) -> entity
     for(let r=1;r<rows.length;r++){
       const row=rows[r]; if(!row) continue;
       const org=cellStr(row[iOrg]); if(!org) continue;
-      let e=map.get(org);
-      if(!e){e={id:map.size,name:org,din:'',orgs:[]};map.set(org,e);}
-      e.orgs.push({
+      const proj={
         name:org,
         address:cellStr(row[iAddr]),
         rera:cellStr(row[iRera]),
@@ -233,13 +233,41 @@ async function loadExcel(){
         complaints:cellStr(row[iCmpl])||'No',
         warrants:'No',
         revoked:'No',
-      });
+      };
+      let e=orgMap.get(org);
+      if(!e){e={name:org,din:'',type:'org',role:'',orgs:[]};orgMap.set(org,e);}
+      e.orgs.push(proj);
+      // Parse "Partner Details" -> "Designation: [Name1, Name2], Designation2: [Name3]"
+      if(iPart>=0){
+        const pd=cellStr(row[iPart]);
+        if(pd && pd.toUpperCase()!=='NA'){
+          // "Designation: [Name1, Name2], Designation2: [Name3]" — or bare "[Name1, Name2]"
+          const groups=[];
+          const re=/([^:\[\],]+):\s*\[([^\]]*)\]/g; let m;
+          while((m=re.exec(pd))!==null) groups.push([m[1].trim(),m[2]]);
+          if(!groups.length){
+            const bare=pd.match(/\[([^\]]*)\]/);
+            if(bare) groups.push(['',bare[1]]);
+          }
+          for(const [desig,names] of groups){
+            for(const nm of names.split(',').map(s=>s.trim()).filter(Boolean)){
+              const key=nm.toLowerCase();
+              let pe=personMap.get(key);
+              if(!pe){pe={name:nm,din:'',type:'person',role:desig,orgs:[]};personMap.set(key,pe);}
+              if(desig && pe.role.indexOf(desig)<0) pe.role=pe.role?pe.role+' / '+desig:desig;
+              // avoid duplicate project rows for the same person
+              if(!pe.orgs.some(o=>o.rera===proj.rera)) pe.orgs.push(proj);
+            }
+          }
+        }
+      }
     }
-    ENTITIES=[...map.values()];
+    ENTITIES=[...personMap.values(),...orgMap.values()];
+    ENTITIES.forEach((e,i)=>e.id=i);
     const el=$('#source');
     el.className='source real';
-    el.innerHTML=`<span class="dot"></span> Registry loaded: <b>&nbsp;${ENTITIES.length.toLocaleString()}</b>&nbsp;organisations · ${(rows.length-1).toLocaleString()} projects`;
-    $('#countPill').textContent=`${ENTITIES.length.toLocaleString()} organisations`;
+    el.innerHTML=`<span class="dot"></span> Registry loaded: <b>&nbsp;${personMap.size.toLocaleString()}</b>&nbsp;people · <b>&nbsp;${orgMap.size.toLocaleString()}</b>&nbsp;organisations · ${(rows.length-1).toLocaleString()} projects`;
+    $('#countPill').textContent=`${personMap.size.toLocaleString()} people · ${orgMap.size.toLocaleString()} orgs`;
   }catch(err){
     const el=$('#source');
     el.className='source sample';
@@ -288,6 +316,7 @@ function cardOf(p){
   return `
   <div class="glass person" data-pid="${p.id}" onclick="setActive(${p.id})">
     <h3>${esc(p.name)}</h3>
+    ${p.type==='person'?`<div class="hint" style="margin:-8px 0 12px;">${p.role?esc(p.role)+' · ':''}${p.orgs.length} project(s)</div>`:''}
     <div class="field">
       <label for="din-${p.id}">DIN/DPIN (If applicable)</label>
       <input id="din-${p.id}" type="text" value="${esc(p.din)}" placeholder="Enter DIN/DPIN"
