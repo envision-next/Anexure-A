@@ -288,7 +288,7 @@ function renderPreview(pid){
     <div class="center">Disclosure of Interest in Other Real Estate Organizations</div>
     <div class="row"><b>Name:</b> ${esc(p.name)}</div>
     <div class="row"><b>DIN/DPIN (If applicable):</b> ${esc(din)||'—'}</div>
-    <div class="row">Are you a Director/ Designated Partner/ Partner/ Proprietor of any organization whose real estate project is registered with any RERA across the country? – <b>Yes</b></div>
+    <div class="row">Are you a Director/ Designated Partner/ Partner/ Proprietor of any organization whose real estate project is registered with any RERA across the country? – <b>${chosen.length?'Yes':'No'}</b></div>
     <div class="row">If yes, please provide the following information:</div>
     <table><thead><tr><th>S.No</th><th>Name of the organization</th><th>Address</th><th>RERA Registration Number</th></tr></thead><tbody>${orgRows}</tbody></table>
     <div class="row">Status of the Real Estate Projects mentioned above:</div>
@@ -303,6 +303,12 @@ async function search(){
   $('#countPill').textContent=`${data.count} ${data.count===1?'match':'matches'}`;
   const box=$('#results');
   if(!PEOPLE.length){
+    if(q.length>=2){
+      // Name not found -> offer the "No" Annexure (NA tables, answer = No).
+      PEOPLE=[{id:-1,name:q,din:'',orgs:[],notFound:true}];
+      box.innerHTML=`<div class="hint" style="margin:0 2px 12px;">No match found — you can still generate a “No” Annexure for this name.</div>`+PEOPLE.map(cardOf).join('');
+      setActive(-1);return;
+    }
     const msg=data.message||'No matching organisation found.';
     box.innerHTML=`<div class="glass empty" style="padding:18px;">${esc(msg)}</div>`;renderPreview(null);return;
   }
@@ -320,7 +326,9 @@ async function generate(pid,btn){
   btn.disabled=true;const old=btn.textContent;btn.textContent='Generating…';
   try{
     const r=await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({person_id:pid,keep_indexes:keep,din:readDin(pid)})});
+      body:JSON.stringify(p&&p.notFound
+        ?{custom_name:p.name,keep_indexes:[],din:readDin(pid)}
+        :{person_id:pid,keep_indexes:keep,din:readDin(pid)})});
     if(!r.ok){alert((await r.json()).error||'Failed.');return;}
     const blob=await r.blob();
     const cd=r.headers.get('Content-Disposition')||'';

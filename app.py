@@ -86,12 +86,16 @@ def api_generate():
     person_id = payload.get("person_id")
     keep = payload.get("keep_indexes")  # list of org indexes to include
     din_override = payload.get("din")   # user-entered DIN/DPIN (optional)
+    custom_name = (payload.get("custom_name") or "").strip()
 
-    if person_id is None or person_id < 0 or person_id >= len(_PEOPLE):
+    if custom_name:
+        # Name not found in the data -> "No" Annexure with NA tables.
+        person = {"name": custom_name, "din": "", "orgs": []}
+    elif person_id is None or person_id < 0 or person_id >= len(_PEOPLE):
         return jsonify({"error": "Unknown person."}), 400
-
-    # Copy so an edited DIN never mutates the cached record.
-    person = dict(_PEOPLE[person_id])
+    else:
+        # Copy so an edited DIN never mutates the cached record.
+        person = dict(_PEOPLE[person_id])
     if din_override is not None:
         person["din"] = str(din_override).strip()
     all_orgs = person["orgs"]

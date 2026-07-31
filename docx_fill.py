@@ -96,9 +96,21 @@ def _resize_table(table, header_rows, needed):
     return table.rows[header_rows:]
 
 
+def _swap_yes_for_no(paragraph):
+    """In the 'Are you a Director/...? - Yes' paragraph, turn 'Yes' into 'No'."""
+    for run in paragraph.runs:
+        if run.text.strip().lower() == "yes":
+            run.text = run.text.replace("Yes", "No").replace("yes", "No")
+
+
 def build_document(base_dir, person, orgs, today_str):
     template_path = _find_template(base_dir)
     doc = Document(template_path)
+
+    # When a person belongs to no organization, the answer becomes "No" and
+    # both tables get a single row of "NA" across every column.
+    na = not orgs
+    org_source = orgs if orgs else [None]
 
     # --- Header paragraphs ---
     seen_signature = False
@@ -113,17 +125,14 @@ def build_document(base_dir, person, orgs, today_str):
             _set_value_after_label(p, "Date:", today_str)
         elif low.startswith("place:"):
             _delete_paragraph(p)
+        elif na and low.startswith("are you a director"):
+            _swap_yes_for_no(p)
         elif "(signature)" in low:
             seen_signature = True
         elif seen_signature and t:
             # First non-empty paragraph after "(Signature)" = signature name.
             _set_para_text(p, person["name"])
             seen_signature = False
-
-    # When a person belongs to no organization, both tables get a single row
-    # of "NA" across every column.
-    na = not orgs
-    org_source = orgs if orgs else [None]
 
     # --- Table 0: Organizations ---
     org_table = doc.tables[0]
