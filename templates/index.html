@@ -97,7 +97,30 @@
   .source.sample{background:rgba(224,139,255,.14);color:#9333ea;}
   .source.sample .dot{background:var(--accent-3);}
 
-  .searchbar{display:flex;gap:10px;padding:14px;margin-bottom:22px;}
+  .searchbar{display:flex;gap:10px;padding:14px;margin-bottom:22px;position:relative;}
+  .searchwrap{flex:1;position:relative;display:flex;flex-wrap:wrap;gap:6px;align-items:center;
+    background:var(--card-2);border:1px solid var(--border);border-radius:11px;padding:5px 8px;cursor:text;
+    transition:border .15s,box-shadow .15s,background .15s;}
+  .searchwrap:hover{background:#fff;}
+  .searchwrap:focus-within{border-color:var(--border-hover);box-shadow:0 0 0 3px var(--glow);background:#fff;}
+  .searchwrap input[type=text]{flex:1;min-width:160px;border:none;background:transparent;box-shadow:none;padding:8px 6px;}
+  .searchwrap input[type=text]:hover,.searchwrap input[type=text]:focus{border:none;box-shadow:none;background:transparent;}
+  #chips{display:contents;}
+  .chip{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:500;
+    background:#fff;border:1px solid var(--border-hover);color:var(--accent);
+    border-radius:999px;padding:6px 11px;white-space:nowrap;}
+  .chip .x{cursor:pointer;font-weight:700;opacity:.6;font-size:14px;line-height:1;}
+  .chip .x:hover{opacity:1;}
+  #suggest{position:absolute;top:calc(100% + 6px);left:0;right:0;z-index:20;
+    background:#fff;border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);
+    max-height:320px;overflow:auto;display:none;}
+  #suggest.open{display:block;}
+  .sug{padding:10px 14px;font-size:14px;cursor:pointer;display:flex;justify-content:space-between;
+    gap:10px;align-items:center;border-bottom:1px solid var(--line-soft);}
+  .sug:last-child{border-bottom:none;}
+  .sug:hover,.sug.sel{background:var(--card-2);}
+  .sug .tag{font-size:11px;color:var(--muted);white-space:nowrap;}
+  .sug b{font-weight:600;}
   input[type=text]{flex:1;padding:13px 15px;font-size:15px;color:var(--text);
     background:var(--card-2);border:1px solid var(--border);border-radius:11px;outline:none;
     transition:border .15s,box-shadow .15s,background .15s;}
@@ -153,6 +176,9 @@
   .paper th,.paper td{border:1px solid #333;color:#111;padding:5px 7px;font-size:11.5px;text-transform:none;letter-spacing:0;}
   .paper th{background:#f0f0f0;font-weight:700;}
   .paper .sig{margin-top:22px;font-size:13px;}
+  .paper .pg{position:relative;padding-bottom:30px;}
+  .paper .pg + .pg{margin-top:20px;border-top:2px dashed #c3c9d6;padding-top:20px;}
+  .paper .pgnum{position:absolute;bottom:6px;left:0;right:0;text-align:center;font-size:10.5px;color:#888;font-family:'Inter',sans-serif;}
 </style>
 </head>
 <body>
@@ -178,11 +204,15 @@
   <div id="source" class="source sample"><span class="dot"></span> Loading data source…</div>
 
   <div class="glass searchbar">
-    <input id="q" type="text" placeholder="Search organisation / promoter name (e.g. Mayfair)…" autocomplete="off">
+    <div class="searchwrap" onclick="document.getElementById('q').focus()">
+      <span id="chips"></span>
+      <input id="q" type="text" placeholder="Search organisation / promoter name (e.g. Mayfair)…" autocomplete="off">
+      <div id="suggest"></div>
+    </div>
     <button id="searchBtn">Search</button>
     <button id="reloadBtn" class="ghost" title="Re-read the Excel file">Reload Excel</button>
   </div>
-  <div class="hint" style="margin:-12px 2px 22px;">Type at least 2 letters of the organisation name, then press Enter.</div>
+  <div class="hint" style="margin:-12px 2px 22px;">Type at least 2 letters, then press Enter · Pick more than one name from the dropdown to combine the same person's different spellings into one Annexure.</div>
 
   <div class="grid">
     <div id="results"></div>
@@ -219,19 +249,29 @@ async function loadSource(){
   }
 }
 
+function isNAProj(o){
+  const na=v=>!v||String(v).trim().toUpperCase()==='NA';
+  return na(o.rera)||na(o.name)||na(o.completion);
+}
 function cardOf(p){
-  const rows=p.orgs.map((o,i)=>`
-    <tr data-i="${i}" class="on">
-      <td class="chk"><input type="checkbox" checked onchange="onChange(${p.id})"></td>
+  const rows=p.orgs.map((o,i)=>{const off=isNAProj(o);return `
+    <tr data-i="${i}" class="${off?'off':'on'}">
+      <td class="chk"><input type="checkbox" ${off?'':'checked'} onchange="onChange(${p.id})"></td>
       <td>${i+1}</td>
       <td>${esc(o.name)}</td>
       <td class="addr">${esc(o.address)}</td>
       <td>${esc(o.rera)}</td>
       <td>${esc(o.completion)}</td>
-    </tr>`).join('');
+    </tr>`;}).join('');
   return `
   <div class="glass person" data-pid="${p.id}" onclick="setActive(${p.id})">
-    <h3>${esc(p.name)}</h3>
+    <h3>${esc(p.merged?p.label:p.name)}</h3>
+    ${p.merged?`<div class="hint" style="margin:-8px 0 12px;">Combined from ${p.sources} names · ${p.orgs.length} project(s), duplicates removed</div>
+    <div class="field">
+      <label for="nm-${p.id}">Name on document</label>
+      <input id="nm-${p.id}" type="text" value="${esc(p.docName)}" placeholder="Name printed on the Annexure"
+             oninput="onChange(${p.id})">
+    </div>`:''}
     <div class="field">
       <label for="din-${p.id}">DIN/DPIN (If applicable)</label>
       <input id="din-${p.id}" type="text" value="${esc(p.din)}" placeholder="Enter DIN/DPIN"
@@ -250,6 +290,7 @@ function cardOf(p){
 
 function personCardEl(pid){return document.querySelector(`.person[data-pid="${pid}"]`);}
 function readDin(pid){const el=$(`#din-${pid}`);return el?el.value:'';}
+function readName(p){const el=$(`#nm-${p.id}`);return (el&&el.value.trim())||p.name;}
 function readKeep(pid){
   const card=personCardEl(pid);
   return [...card.querySelectorAll('tbody tr[data-i]')]
@@ -276,6 +317,7 @@ function renderPreview(pid){
   const p=PEOPLE.find(x=>x.id===pid);
   const box=$('#preview');
   if(!p){box.innerHTML='<div style="color:#888;font-family:Inter;">Select a person to preview.</div>';return;}
+  const docName=readName(p);
   const din=readDin(pid);
   const keep=new Set(readKeep(pid));
   const chosen=p.orgs.filter((_,i)=>keep.has(i));
@@ -283,21 +325,110 @@ function renderPreview(pid){
     || '<tr><td>NA</td><td>NA</td><td>NA</td><td>NA</td></tr>';
   const statRows=chosen.map((o,i)=>`<tr><td>${i+1}</td><td>${esc(o.rera)}</td><td>${esc(o.completion)}</td><td>${esc(o.complaints)}</td><td>${esc(o.warrants)}</td><td>${esc(o.revoked)}</td></tr>`).join('')
     || '<tr><td>NA</td><td>NA</td><td>NA</td><td>NA</td><td>NA</td><td>NA</td></tr>';
-  box.innerHTML=`
+  paginateInto(box,`
     <h2>Annexure A</h2>
     <div class="center">Disclosure of Interest in Other Real Estate Organizations</div>
-    <div class="row"><b>Name:</b> ${esc(p.name)}</div>
+    <div class="row"><b>Name:</b> ${esc(docName)}</div>
     <div class="row"><b>DIN/DPIN (If applicable):</b> ${esc(din)||'—'}</div>
     <div class="row">Are you a Director/ Designated Partner/ Partner/ Proprietor of any organization whose real estate project is registered with any RERA across the country? – <b>${chosen.length?'Yes':'No'}</b></div>
     <div class="row">If yes, please provide the following information:</div>
     <table><thead><tr><th>S.No</th><th>Name of the organization</th><th>Address</th><th>RERA Registration Number</th></tr></thead><tbody>${orgRows}</tbody></table>
     <div class="row">Status of the Real Estate Projects mentioned above:</div>
     <table><thead><tr><th>S.No</th><th>RERA Reg. Number</th><th>Proposed Date of Completion</th><th>Complaints pending</th><th>Warrants issued</th><th>Revoked by RERA?</th></tr></thead><tbody>${statRows}</tbody></table>
-    <div class="sig">(Signature)<br><br><b>${esc(p.name)}</b><br>Date: ${today()}</div>`;
+    <div class="sig">(Signature)<br><br><b>${esc(docName)}</b><br>Date: ${today()}</div>`);
+}
+
+/* Split preview content into A4-proportioned pages with "Page X of Y" footers.
+   Long tables are cut row-by-row and the header row repeats on the next page. */
+function mkPgTable(theadHTML){const t=document.createElement('table');t.innerHTML=theadHTML+'<tbody></tbody>';return t;}
+function paginateInto(box,html){
+  const innerW=Math.max(280,box.clientWidth-52);
+  const pageH=Math.round(innerW*1.414);          // A4 aspect ratio
+  box.innerHTML='';
+  const meas=document.createElement('div');
+  meas.style.cssText=`position:absolute;left:-9999px;top:0;width:${innerW}px;visibility:hidden;`;
+  box.appendChild(meas);
+  meas.innerHTML=html;
+  const units=[];
+  [...meas.children].forEach(el=>{
+    if(el.tagName==='TABLE'){
+      const theadHTML=el.tHead?el.tHead.outerHTML:'';
+      [...(el.tBodies[0]?.rows||[])].forEach((tr,i)=>units.push({row:true,theadHTML,trHTML:tr.outerHTML,first:i===0}));
+    }else units.push({el});
+  });
+  meas.innerHTML='';
+  const pages=[];let pg=document.createElement('div');pg.className='pg';meas.appendChild(pg);
+  let curTable=null;
+  const newPage=()=>{pages.push(pg);pg=document.createElement('div');pg.className='pg';meas.appendChild(pg);curTable=null;};
+  const overflows=()=>pg.scrollHeight>pageH;
+  for(const u of units){
+    if(u.row){
+      if(!curTable||u.first){curTable=mkPgTable(u.theadHTML);pg.appendChild(curTable);}
+      curTable.tBodies[0].insertAdjacentHTML('beforeend',u.trHTML);
+      if(overflows()&&(pg.children.length>1||curTable.tBodies[0].rows.length>1)){
+        curTable.tBodies[0].lastElementChild.remove();
+        if(!curTable.tBodies[0].rows.length) curTable.remove();
+        newPage();
+        curTable=mkPgTable(u.theadHTML);pg.appendChild(curTable);
+        curTable.tBodies[0].insertAdjacentHTML('beforeend',u.trHTML);
+      }
+    }else{
+      pg.appendChild(u.el);
+      if(overflows()&&pg.children.length>1){u.el.remove();newPage();pg.appendChild(u.el);}
+      curTable=null;
+    }
+  }
+  pages.push(pg);
+  box.innerHTML='';
+  pages.forEach((p,i)=>{
+    p.style.minHeight=pageH+'px';
+    p.insertAdjacentHTML('beforeend',`<div class="pgnum">Page ${i+1} of ${pages.length}</div>`);
+    box.appendChild(p);
+  });
+}
+
+/* ---------- Multi-select chips ---------- */
+let SELECTED=[];   // person objects picked from the dropdown
+function renderChips(){
+  $('#chips').innerHTML=SELECTED.map((p,i)=>
+    `<span class="chip">${esc(p.name)}<span class="x" title="Remove" onclick="event.stopPropagation();removeChip(${i})">×</span></span>`
+  ).join('');
+}
+function addChip(p){
+  // Toggle: picking an already-selected name removes it again.
+  const at=SELECTED.findIndex(s=>s.id===p.id);
+  if(at>=0) SELECTED.splice(at,1); else SELECTED.push(p);
+  renderChips();
+  search();
+  renderSuggest();   // keep the dropdown open so more names can be picked
+  $('#q').focus();
+}
+function removeChip(i){SELECTED.splice(i,1);renderChips();search();}
+
+function mergedEntity(sel){
+  // Union of all projects across the selected names, duplicates removed.
+  const seen=new Set(), orgs=[];
+  for(const p of sel) for(const o of p.orgs){
+    const k=(o.rera||'')+'|'+(o.name||'');
+    if(seen.has(k)) continue; seen.add(k); orgs.push(o);
+  }
+  return {id:99999998,name:sel[0].name,docName:sel[0].name,merged:true,
+    label:sel.map(p=>p.name).join(' + '),sources:sel.length,din:'',orgs};
 }
 
 async function search(){
   const q=$('#q').value.trim();
+  if(SELECTED.length){
+    const sel=[...SELECTED];
+    PEOPLE=sel.length>1?[mergedEntity(sel),...sel]:sel;
+    $('#countPill').textContent=`${sel.length} selected`;
+    const banner=sel.length>1
+      ?`<div class="hint" style="margin:0 2px 12px;">The first card combines all projects from the selected names (duplicates removed) — use it to generate one Annexure for the same person under different names.</div>`
+      :'';
+    $('#results').innerHTML=banner+PEOPLE.map(cardOf).join('');
+    setActive(PEOPLE[0].id);
+    return;
+  }
   const data=await (await fetch('/api/search?q='+encodeURIComponent(q))).json();
   PEOPLE=data.results;
   $('#countPill').textContent=`${data.count} ${data.count===1?'match':'matches'}`;
@@ -325,10 +456,18 @@ async function generate(pid,btn){
   if(!keep.length && p && p.orgs.length>0){alert('Tick at least one organization.');return;}
   btn.disabled=true;const old=btn.textContent;btn.textContent='Generating…';
   try{
+    let body;
+    if(p&&p.notFound){
+      body={custom_name:p.name,keep_indexes:[],din:readDin(pid)};
+    }else if(p&&p.merged){
+      // Merged multi-name card: send the kept rows directly with the chosen name.
+      const chosen=p.orgs.filter((_,i)=>keep.includes(i));
+      body={custom_name:readName(p),orgs:chosen,din:readDin(pid)};
+    }else{
+      body={person_id:pid,keep_indexes:keep,din:readDin(pid)};
+    }
     const r=await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify(p&&p.notFound
-        ?{custom_name:p.name,keep_indexes:[],din:readDin(pid)}
-        :{person_id:pid,keep_indexes:keep,din:readDin(pid)})});
+      body:JSON.stringify(body)});
     if(!r.ok){alert((await r.json()).error||'Failed.');return;}
     const blob=await r.blob();
     const cd=r.headers.get('Content-Disposition')||'';
@@ -338,8 +477,49 @@ async function generate(pid,btn){
   }finally{btn.disabled=false;btn.textContent=old;}
 }
 
-$('#searchBtn').onclick=search;
-$('#q').addEventListener('keydown',e=>{if(e.key==='Enter')search();});
+/* ---------- Autocomplete dropdown ---------- */
+let sugItems=[], sugSel=-1, sugTimer=null, sugSeq=0;
+function hideSuggest(){$('#suggest').classList.remove('open');sugItems=[];sugSel=-1;}
+function pickSuggest(i){const p=sugItems[i];if(p)addChip(p);}
+function renderSuggest(){
+  const box=$('#suggest');
+  if(!sugItems.length){hideSuggest();return;}
+  box.innerHTML=sugItems.map((p,i)=>`
+    <div class="sug${i===sugSel?' sel':''}" onmousedown="event.preventDefault();pickSuggest(${i})">
+      <b>${SELECTED.some(s=>s.id===p.id)?'✓ ':''}${esc(p.name)}</b>
+      <span class="tag">${p.orgs.length} project(s)</span>
+    </div>`).join('');
+  box.classList.add('open');
+}
+async function updateSuggest(){
+  const q=$('#q').value.trim();
+  if(q.length<2){hideSuggest();return;}
+  const seq=++sugSeq;
+  try{
+    const data=await (await fetch('/api/search?q='+encodeURIComponent(q))).json();
+    if(seq!==sugSeq) return;   // a newer request finished already
+    sugItems=(data.results||[]).slice(0,8);
+    sugSel=-1;
+    renderSuggest();
+  }catch(_){hideSuggest();}
+}
+$('#q').addEventListener('input',()=>{clearTimeout(sugTimer);sugTimer=setTimeout(updateSuggest,150);});
+// Reopen the dropdown when clicking back into a search box that already has text.
+$('#q').addEventListener('focus',()=>updateSuggest());
+$('#q').addEventListener('click',()=>{if(!$('#suggest').classList.contains('open'))updateSuggest();});
+$('#q').addEventListener('blur',()=>setTimeout(hideSuggest,150));
+$('#q').addEventListener('keydown',e=>{
+  const open=$('#suggest').classList.contains('open');
+  if(e.key==='ArrowDown'&&open){e.preventDefault();sugSel=Math.min(sugSel+1,sugItems.length-1);renderSuggest();}
+  else if(e.key==='ArrowUp'&&open){e.preventDefault();sugSel=Math.max(sugSel-1,0);renderSuggest();}
+  else if(e.key==='Escape'){hideSuggest();}
+  else if(e.key==='Backspace'&&!$('#q').value&&SELECTED.length){removeChip(SELECTED.length-1);}
+  else if(e.key==='Enter'){
+    if(open&&sugSel>=0){pickSuggest(sugSel);}
+    else{hideSuggest();search();}
+  }
+});
+$('#searchBtn').onclick=()=>{hideSuggest();search();};
 $('#reloadBtn').onclick=async()=>{await fetch('/api/reload',{method:'POST'});await loadSource();await search();};
 
 // boot: run data load behind the splash, then reveal

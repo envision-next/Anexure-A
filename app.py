@@ -17,6 +17,7 @@ Then open http://127.0.0.1:5000 in your browser.
 
 import io
 import os
+import re
 import datetime
 
 from flask import Flask, request, jsonify, send_file, render_template
@@ -65,8 +66,12 @@ def api_search():
     CAP = 50
     results = []
     total = 0
+    words = q.split()
     for idx, person in enumerate(_PEOPLE):
-        if q in person["name"].lower():
+        # Every typed word must match the start of a word in the name,
+        # so "na" finds "Nareshkumar" but not "Krishna".
+        name_words = re.split(r"[^a-z0-9]+", person["name"].lower())
+        if all(any(nw.startswith(w) for nw in name_words) for w in words):
             total += 1
             if len(results) < CAP:
                 results.append({
@@ -87,10 +92,12 @@ def api_generate():
     keep = payload.get("keep_indexes")  # list of org indexes to include
     din_override = payload.get("din")   # user-entered DIN/DPIN (optional)
     custom_name = (payload.get("custom_name") or "").strip()
+    custom_orgs = payload.get("orgs")  # merged multi-name selection sends its rows directly
 
     if custom_name:
-        # Name not found in the data -> "No" Annexure with NA tables.
-        person = {"name": custom_name, "din": "", "orgs": []}
+        # Either a name not found in the data ("No" Annexure with NA tables),
+        # or a merged selection of several name spellings with explicit rows.
+        person = {"name": custom_name, "din": "", "orgs": list(custom_orgs or [])}
     elif person_id is None or person_id < 0 or person_id >= len(_PEOPLE):
         return jsonify({"error": "Unknown person."}), 400
     else:

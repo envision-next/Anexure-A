@@ -17,6 +17,7 @@ Each person is a dict:
 """
 
 import os
+import re
 import glob
 
 import openpyxl
@@ -29,12 +30,14 @@ COLUMN_KEYWORDS = {
     "name":       [["director", "name"], ["person"], ["member", "name"], ["name of"]],
     "din":        [["din"], ["dpin"]],
     "org":        [["organi"], ["firm"], ["company"]],
+    "project":    [["project", "name"], ["project"]],
     "address":    [["address"]],
     "rera":       [["rera"], ["registration", "number"], ["reg", "no"]],
     "completion": [["completion"], ["proposed", "date"], ["date", "complet"]],
     "complaints": [["complaint"]],
     "warrants":   [["warrant"]],
     "revoked":    [["revoke"]],
+    "partner":    [["partner"]],
 }
 
 # Fields where a plain "name" header should NOT be treated as the person name
@@ -143,27 +146,54 @@ def load_people(base_dir):
 
     entities = {}
     order = []
+    people = {}          # person name (lowercase) -> entity, from "Partner Details"
+    people_order = []
     for raw in it:
         if raw is None:
             continue
-        org_name = _cell(raw, org_i)
-        if not org_name:
+        # Fall back to the project name when the organisation cell is blank,
+        # and keep blank-org rows that still carry a RERA number.
+        org_name = _cell(raw, org_i) or _cell(raw, cols.get("project"))
+        if not org_name and not _cell(raw, cols.get("rera")):
             continue
-        if org_name not in entities:
-            entities[org_name] = {"name": org_name, "din": "", "orgs": []}
-            order.append(org_name)
-        entities[org_name]["orgs"].append({
-            "name": org_name,
+        proj = {
+            "name": org_name or "NA",
             "address": _cell(raw, cols.get("address")),
             "rera": _cell(raw, cols.get("rera")),
             "completion": _cell(raw, cols.get("completion")),
             "complaints": _cell(raw, cols.get("complaints")) or "No",
             "warrants": "No",
             "revoked": "No",
-        })
+        }
+        if org_name:
+            if org_name not in entities:
+                entities[org_name] = {"name": org_name, "din": "", "orgs": []}
+                order.append(org_name)
+            entities[org_name]["orgs"].append(proj)
+
+        # "Partner Details" -> "Designation: [Name1, Name2], Designation2: [Name3]"
+        pd = _cell(raw, cols.get("partner"))
+        if pd and pd.upper() != "NA":
+            groups = re.findall(r"[^:\[\],]+:\s*\[([^\]]*)\]", pd)
+            if not groups:
+                bare = re.search(r"\[([^\]]*)\]", pd)
+                if bare:
+                    groups = [bare.group(1)]
+            for names in groups:
+                for nm in (s.strip() for s in names.split(",")):
+                    if not nm:
+                        continue
+                    key = nm.lower()
+                    pe = people.get(key)
+                    if pe is None:
+                        pe = {"name": nm, "din": "", "orgs": []}
+                        people[key] = pe
+                        people_order.append(key)
+                    if not any(o["rera"] == proj["rera"] for o in pe["orgs"]):
+                        pe["orgs"].append(proj)
 
     wb.close()
-    result = [entities[k] for k in order]
+    result = [people[k] for k in people_order] + [entities[k] for k in order]
     return result or [dict(p) for p in SAMPLE_PEOPLE]
 
 

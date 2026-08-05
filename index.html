@@ -87,8 +87,19 @@
   .source.sample .dot{background:var(--accent-3);}
 
   .searchbar{display:flex;gap:10px;padding:14px;margin-bottom:22px;position:relative;}
-  .searchwrap{flex:1;position:relative;}
-  .searchwrap input{width:100%;}
+  .searchwrap{flex:1;position:relative;display:flex;flex-wrap:wrap;gap:6px;align-items:center;
+    background:var(--card-2);border:1px solid var(--border);border-radius:11px;padding:5px 8px;cursor:text;
+    transition:border .15s,box-shadow .15s,background .15s;}
+  .searchwrap:hover{background:#fff;}
+  .searchwrap:focus-within{border-color:var(--border-hover);box-shadow:0 0 0 3px var(--glow);background:#fff;}
+  .searchwrap input[type=text]{flex:1;min-width:160px;border:none;background:transparent;box-shadow:none;padding:8px 6px;}
+  .searchwrap input[type=text]:hover,.searchwrap input[type=text]:focus{border:none;box-shadow:none;background:transparent;}
+  #chips{display:contents;}
+  .chip{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:500;
+    background:#fff;border:1px solid var(--border-hover);color:var(--accent);
+    border-radius:999px;padding:6px 11px;white-space:nowrap;}
+  .chip .x{cursor:pointer;font-weight:700;opacity:.6;font-size:14px;line-height:1;}
+  .chip .x:hover{opacity:1;}
   input[type=date]{padding:12px 13px;font-size:14px;color:var(--text);font-family:'Inter';
     background:var(--card-2);border:1px solid var(--border);border-radius:11px;outline:none;cursor:pointer;}
   input[type=date]:focus{border-color:var(--border-hover);box-shadow:0 0 0 3px var(--glow);}
@@ -156,6 +167,9 @@
   .paper th,.paper td{border:1px solid #333;color:#111;padding:5px 7px;font-size:11.5px;text-transform:none;letter-spacing:0;}
   .paper th{background:#f0f0f0;font-weight:700;}
   .paper .sig{margin-top:22px;font-size:13px;}
+  .paper .pg{position:relative;padding-bottom:30px;}
+  .paper .pg + .pg{margin-top:20px;border-top:2px dashed #c3c9d6;padding-top:20px;}
+  .paper .pgnum{position:absolute;bottom:6px;left:0;right:0;text-align:center;font-size:10.5px;color:#888;font-family:'Inter',sans-serif;}
 </style>
 </head>
 <body>
@@ -181,14 +195,15 @@
   <div id="source" class="source sample"><span class="dot"></span> Loading data…</div>
 
   <div class="glass searchbar">
-    <div class="searchwrap">
+    <div class="searchwrap" onclick="document.getElementById('q').focus()">
+      <span id="chips"></span>
       <input id="q" type="text" placeholder="Search a person (partner/director) or organisation name…" autocomplete="off">
       <div id="suggest"></div>
     </div>
     <input id="fromDate" type="date" title="Show only projects with completion date on or after this date" onchange="search()">
     <button id="searchBtn">Search</button>
   </div>
-  <div class="hint" style="margin:-12px 2px 22px;">Type at least 2 letters of a name · Pick a start date to show only projects with completion date on or after it (leave empty for all).</div>
+  <div class="hint" style="margin:-12px 2px 22px;">Type at least 2 letters of a name · Pick more than one name from the dropdown to combine the same person's different spellings into one Annexure · Pick a start date to show only projects with completion date on or after it (leave empty for all).</div>
 
   <div class="grid">
     <div id="results"></div>
@@ -299,20 +314,72 @@ async function loadExcel(){
   // reveal the app
   document.body.classList.add('ready');
   const i=$('#intro'); if(i){i.classList.add('hide'); setTimeout(()=>i.remove(),800);}
+  // If the user already typed while the registry was still loading, show results now.
+  if(document.activeElement===$('#q') && $('#q').value.trim().length>=2) updateSuggest();
+}
+
+/* ---------- Multi-select chips ---------- */
+let SELECTED=[];   // ids of entities picked from the dropdown
+function renderChips(){
+  $('#chips').innerHTML=SELECTED.map((id,i)=>{
+    const e=ENTITIES.find(x=>x.id===id); if(!e) return '';
+    return `<span class="chip">${esc(e.name)}<span class="x" title="Remove" onclick="event.stopPropagation();removeChip(${i})">×</span></span>`;
+  }).join('');
+}
+function addChip(id){
+  // Toggle: picking an already-selected name removes it again.
+  const at=SELECTED.indexOf(id);
+  if(at>=0) SELECTED.splice(at,1); else SELECTED.push(id);
+  renderChips();
+  search();
+  renderSuggest();   // keep the dropdown open so more names can be picked
+  $('#q').focus();
+}
+function removeChip(i){SELECTED.splice(i,1);renderChips();search();}
+
+function mergedEntity(sel){
+  // Union of all projects across the selected names, duplicates removed.
+  const seen=new Set(), orgs=[];
+  for(const e of sel) for(const o of e.orgs){
+    const k=(o.rera||'')+'|'+(o.name||'');
+    if(seen.has(k)) continue; seen.add(k); orgs.push(o);
+  }
+  return {id:99999998,name:sel[0].name,docName:sel[0].name,merged:true,
+    label:sel.map(e=>e.name).join(' + '),din:'',type:'person',
+    role:'Combined from '+sel.length+' names',orgs};
+}
+
+/* Every typed word must match the START of a word in the name,
+   so "na" finds "Nareshkumar" but not "Krishna". */
+function nameMatches(name,words){
+  const nw=name.toLowerCase().split(/[^a-z0-9]+/);
+  return words.every(w=>nw.some(x=>x.startsWith(w)));
 }
 
 /* ---------- Search ---------- */
 function search(){
   const q=$('#q').value.trim().toLowerCase();
   const box=$('#results');
+  if(SELECTED.length){
+    const sel=SELECTED.map(id=>ENTITIES.find(e=>e.id===id)).filter(Boolean);
+    PEOPLE=sel.length>1?[mergedEntity(sel),...sel]:[...sel];
+    $('#countPill').textContent=`${sel.length} selected`;
+    const banner=sel.length>1
+      ?`<div class="hint" style="margin:0 2px 12px;">The first card combines all projects from the selected names (duplicates removed) — use it to generate one Annexure for the same person under different names.</div>`
+      :'';
+    box.innerHTML=banner+PEOPLE.map(cardOf).join('');
+    setActive(PEOPLE[0].id);
+    return;
+  }
   if(q.length<2){
     PEOPLE=[];
     box.innerHTML='<div class="glass empty" style="padding:18px;">Type at least 2 letters of an organisation name.</div>';
     renderPreview(null);return;
   }
   const CAP=50; let total=0; const out=[];
+  const words=q.split(/\s+/).filter(Boolean);
   for(const e of ENTITIES){
-    if(e.name.toLowerCase().includes(q)){
+    if(nameMatches(e.name,words)){
       total++;
       if(out.length<CAP) out.push(e);
     }
@@ -369,8 +436,13 @@ function cardOf(p){
   const hidden=p.orgs.length-visible.length;
   return `
   <div class="glass person" data-pid="${p.id}" onclick="setActive(${p.id})">
-    <h3>${esc(p.name)}</h3>
+    <h3>${esc(p.merged?p.label:p.name)}</h3>
     ${p.type==='person'?`<div class="hint" style="margin:-8px 0 12px;">${p.role?esc(p.role)+' · ':''}${p.orgs.length} project(s)${hidden>0?` · ${hidden} outside date range`:''}</div>`:''}
+    ${p.merged?`<div class="field">
+      <label for="nm-${p.id}">Name on document</label>
+      <input id="nm-${p.id}" type="text" value="${esc(p.docName)}" placeholder="Name printed on the Annexure"
+             oninput="onChange(${p.id})">
+    </div>`:''}
     <div class="field">
       <label for="din-${p.id}">DIN/DPIN (If applicable)</label>
       <input id="din-${p.id}" type="text" value="${esc(p.din)}" placeholder="Enter DIN/DPIN"
@@ -392,6 +464,7 @@ function cardOf(p){
 
 function personCardEl(pid){return document.querySelector(`.person[data-pid="${pid}"]`);}
 function readDin(pid){const el=$(`#din-${pid}`);return el?el.value:'';}
+function readName(p){const el=$(`#nm-${p.id}`);return (el&&el.value.trim())||p.name;}
 function readKeep(pid){
   const card=personCardEl(pid); if(!card) return [];
   return [...card.querySelectorAll('tbody tr[data-i]')]
@@ -422,6 +495,7 @@ function renderPreview(pid){
   const p=PEOPLE.find(x=>x.id===pid);
   const box=$('#preview');
   if(!p){box.innerHTML='<div style="color:#888;font-family:Inter;">Search and select an organisation to preview.</div>';return;}
+  const docName=readName(p);
   const din=readDin(pid);
   const keep=new Set(readKeep(pid));
   const chosen=p.orgs.filter((_,i)=>keep.has(i));
@@ -429,17 +503,66 @@ function renderPreview(pid){
     || '<tr><td>NA</td><td>NA</td><td>NA</td><td>NA</td></tr>';
   const statRows=chosen.map((o,i)=>`<tr><td>${i+1}</td><td>${esc(o.rera)}</td><td>${esc(o.completion)}</td><td>${esc(o.complaints)}</td><td>${esc(o.warrants)}</td><td>${esc(o.revoked)}</td></tr>`).join('')
     || '<tr><td>NA</td><td>NA</td><td>NA</td><td>NA</td><td>NA</td><td>NA</td></tr>';
-  box.innerHTML=`
+  paginateInto(box,`
     <h2>Annexure A</h2>
     <div class="center">Disclosure of Interest in Other Real Estate Organizations</div>
-    <div class="row"><b>Name:</b> ${esc(p.name)}</div>
+    <div class="row"><b>Name:</b> ${esc(docName)}</div>
     <div class="row"><b>DIN/DPIN (If applicable):</b> ${esc(din)||'—'}</div>
     <div class="row">Are you a Director/ Designated Partner/ Partner/ Proprietor of any organization whose real estate project is registered with any RERA across the country? – <b>${chosen.length?'Yes':'No'}</b></div>
     <div class="row">If yes, please provide the following information:</div>
     <table><thead><tr><th>S.No</th><th>Name of the organization</th><th>Address</th><th>RERA Registration Number</th></tr></thead><tbody>${orgRows}</tbody></table>
     <div class="row">Status of the Real Estate Projects mentioned above:</div>
     <table><thead><tr><th>S.No</th><th>RERA Reg. Number</th><th>Proposed Date of Completion</th><th>Complaints pending</th><th>Warrants issued</th><th>Revoked by RERA?</th></tr></thead><tbody>${statRows}</tbody></table>
-    <div class="sig">(Signature)<br><br><b>${esc(p.name)}</b><br>Date: ${today()}</div>`;
+    <div class="sig">(Signature)<br><br><b>${esc(docName)}</b><br>Date: ${today()}</div>`);
+}
+
+/* Split preview content into A4-proportioned pages with "Page X of Y" footers.
+   Long tables are cut row-by-row and the header row repeats on the next page. */
+function mkPgTable(theadHTML){const t=document.createElement('table');t.innerHTML=theadHTML+'<tbody></tbody>';return t;}
+function paginateInto(box,html){
+  const innerW=Math.max(280,box.clientWidth-52);
+  const pageH=Math.round(innerW*1.414);          // A4 aspect ratio
+  box.innerHTML='';
+  const meas=document.createElement('div');
+  meas.style.cssText=`position:absolute;left:-9999px;top:0;width:${innerW}px;visibility:hidden;`;
+  box.appendChild(meas);
+  meas.innerHTML=html;
+  const units=[];
+  [...meas.children].forEach(el=>{
+    if(el.tagName==='TABLE'){
+      const theadHTML=el.tHead?el.tHead.outerHTML:'';
+      [...(el.tBodies[0]?.rows||[])].forEach((tr,i)=>units.push({row:true,theadHTML,trHTML:tr.outerHTML,first:i===0}));
+    }else units.push({el});
+  });
+  meas.innerHTML='';
+  const pages=[];let pg=document.createElement('div');pg.className='pg';meas.appendChild(pg);
+  let curTable=null;
+  const newPage=()=>{pages.push(pg);pg=document.createElement('div');pg.className='pg';meas.appendChild(pg);curTable=null;};
+  const overflows=()=>pg.scrollHeight>pageH;
+  for(const u of units){
+    if(u.row){
+      if(!curTable||u.first){curTable=mkPgTable(u.theadHTML);pg.appendChild(curTable);}
+      curTable.tBodies[0].insertAdjacentHTML('beforeend',u.trHTML);
+      if(overflows()&&(pg.children.length>1||curTable.tBodies[0].rows.length>1)){
+        curTable.tBodies[0].lastElementChild.remove();
+        if(!curTable.tBodies[0].rows.length) curTable.remove();
+        newPage();
+        curTable=mkPgTable(u.theadHTML);pg.appendChild(curTable);
+        curTable.tBodies[0].insertAdjacentHTML('beforeend',u.trHTML);
+      }
+    }else{
+      pg.appendChild(u.el);
+      if(overflows()&&pg.children.length>1){u.el.remove();newPage();pg.appendChild(u.el);}
+      curTable=null;
+    }
+  }
+  pages.push(pg);
+  box.innerHTML='';
+  pages.forEach((p,i)=>{
+    p.style.minHeight=pageH+'px';
+    p.insertAdjacentHTML('beforeend',`<div class="pgnum">Page ${i+1} of ${pages.length}</div>`);
+    box.appendChild(p);
+  });
 }
 
 /* ---------- Word generation (in browser, via docx.js) ---------- */
@@ -449,6 +572,7 @@ function generate(pid,btn){
   if(!keep.length && p.orgs.length>0){alert('Tick at least one organization.');return;}
   const chosen=p.orgs.filter((_,i)=>keep.includes(i));
   const din=readDin(pid);
+  const docName=readName(p);
 
   const D=window.docx;
   const F='Times New Roman', SZ=22; // 11pt
@@ -472,7 +596,7 @@ function generate(pid,btn){
     para([t('Annexure A',{bold:true,size:26})],{alignment:D.AlignmentType.CENTER}),
     para([t('Disclosure of Interest in Other Real Estate Organizations',{bold:true})],{alignment:D.AlignmentType.CENTER}),
     para([]),
-    para([t('Name: ',{bold:true}),t(p.name)]),
+    para([t('Name: ',{bold:true}),t(docName)]),
     para([t('DIN/DPIN (If applicable): ',{bold:true}),t(din||'NA')]),
     para([t('Are you a Director/ Designated Partner/ Partner/ Proprietor of any organization whose real estate project is registered with any Real Estate Regulatory Authority (RERA) across the country? – '),t(na?'No':'Yes',{bold:true})]),
     para([t('If yes, please provide the following information:')]),
@@ -489,13 +613,13 @@ function generate(pid,btn){
     para([]),
     para([t('(Signature)')]),
     para([]),
-    para([t(p.name,{bold:true})]),
+    para([t(docName,{bold:true})]),
     para([t('Date: '+today())]),
   ]}]});
 
   btn.disabled=true;const old=btn.textContent;btn.textContent='Generating…';
   D.Packer.toBlob(doc).then(blob=>{
-    const safe=p.name.replace(/[^\w \-]/g,'').trim();
+    const safe=docName.replace(/[^\w \-]/g,'').trim();
     const a=document.createElement('a');
     a.href=URL.createObjectURL(blob);
     a.download=`${safe} - Annexure A.docx`;
@@ -506,13 +630,13 @@ function generate(pid,btn){
 /* ---------- Autocomplete dropdown ---------- */
 let sugItems=[], sugSel=-1, sugTimer=null;
 function hideSuggest(){$('#suggest').classList.remove('open');sugItems=[];sugSel=-1;}
-function pickSuggest(name){$('#q').value=name;hideSuggest();search();}
+function pickSuggest(id){addChip(id);}
 function renderSuggest(){
   const box=$('#suggest');
   if(!sugItems.length){hideSuggest();return;}
   box.innerHTML=sugItems.map((e,i)=>`
-    <div class="sug${i===sugSel?' sel':''}" onmousedown="event.preventDefault();pickSuggest(${JSON.stringify(e.name).replace(/"/g,'&quot;')})">
-      <b>${esc(e.name)}</b>
+    <div class="sug${i===sugSel?' sel':''}" onmousedown="event.preventDefault();pickSuggest(${e.id})">
+      <b>${SELECTED.includes(e.id)?'✓ ':''}${esc(e.name)}</b>
       <span class="tag">${e.type==='person'?esc(e.role||'Person'):'Organisation'} · ${e.orgs.length} project(s)</span>
     </div>`).join('');
   box.classList.add('open');
@@ -520,11 +644,11 @@ function renderSuggest(){
 function updateSuggest(){
   const q=$('#q').value.trim().toLowerCase();
   if(q.length<2||!ENTITIES.length){hideSuggest();return;}
+  const words=q.split(/\s+/).filter(Boolean);
   const starts=[],contains=[];
   for(const e of ENTITIES){
-    const n=e.name.toLowerCase();
-    if(n.startsWith(q)) starts.push(e);
-    else if(n.includes(q)) contains.push(e);
+    if(!nameMatches(e.name,words)) continue;
+    if(e.name.toLowerCase().startsWith(words[0])) starts.push(e); else contains.push(e);
     if(starts.length>=8) break;
   }
   sugItems=[...starts,...contains].slice(0,8);
@@ -532,14 +656,18 @@ function updateSuggest(){
   renderSuggest();
 }
 $('#q').addEventListener('input',()=>{clearTimeout(sugTimer);sugTimer=setTimeout(updateSuggest,120);});
+// Reopen the dropdown when clicking back into a search box that already has text.
+$('#q').addEventListener('focus',()=>updateSuggest());
+$('#q').addEventListener('click',()=>{if(!$('#suggest').classList.contains('open'))updateSuggest();});
 $('#q').addEventListener('blur',()=>setTimeout(hideSuggest,150));
 $('#q').addEventListener('keydown',e=>{
   const open=$('#suggest').classList.contains('open');
   if(e.key==='ArrowDown'&&open){e.preventDefault();sugSel=Math.min(sugSel+1,sugItems.length-1);renderSuggest();}
   else if(e.key==='ArrowUp'&&open){e.preventDefault();sugSel=Math.max(sugSel-1,0);renderSuggest();}
   else if(e.key==='Escape'){hideSuggest();}
+  else if(e.key==='Backspace'&&!$('#q').value&&SELECTED.length){removeChip(SELECTED.length-1);}
   else if(e.key==='Enter'){
-    if(open&&sugSel>=0){pickSuggest(sugItems[sugSel].name);}
+    if(open&&sugSel>=0){pickSuggest(sugItems[sugSel].id);}
     else{hideSuggest();search();}
   }
 });
